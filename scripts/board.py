@@ -84,3 +84,14 @@ def overview_photos():
             with open(f, encoding="utf-8") as fh:
                 names.add(fh.read().strip())
     return names
+
+
+def _friendly(exc_type, exc, tb):
+    """A missing input file means an earlier step has not been run: say so plainly."""
+    if issubclass(exc_type, FileNotFoundError) and getattr(exc, "filename", None):
+        rel = os.path.relpath(exc.filename, PROJECT) if str(exc.filename).startswith(PROJECT) else exc.filename
+        sys.exit("Missing file: %s\nAn earlier step makes it. The steps, in order, are in the README." % rel)
+    sys.__excepthook__(exc_type, exc, tb)
+
+
+sys.excepthook = _friendly
