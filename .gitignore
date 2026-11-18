@@ -1,0 +1,16 @@
+__pycache__/
+*.pyc
+# never commit a board: photos and results stay in your own project folder
+photos/
+work/
+maps/
+data/
+kicad/
+board.json
+*.jpg
+*.jpeg
+*.png
+*.heic
+*.pkl
+*.csv
+*.kicad_pcb

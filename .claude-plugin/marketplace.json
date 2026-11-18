@@ -1,0 +1,14 @@
+{
+  "name": "shadowskeep",
+  "description": "Plugins from ShadowsKeep. PCB reverse engineering from phone photos.",
+  "owner": {
+    "name": "ShadowsKeep"
+  },
+  "plugins": [
+    {
+      "name": "pcb-reverse-engineering",
+      "source": "./",
+      "description": "Reverse engineer a PCB from phone photos: to-scale board maps, via / test pad / component detection, trace following, a browser review editor, and KiCad export."
+    }
+  ]
+}
