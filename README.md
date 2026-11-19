@@ -6,6 +6,8 @@ It is a [Claude Code](https://claude.com/claude-code) plugin, so Claude can run 
 
 Useful for repairing a board with no schematic, documenting old hardware, cloning a simple board, or finding where a programming header connects.
 
+**Tried it on a board? Tell us how it went**, good or bad: [share a board result](https://github.com/ShadowsKeep/pcb-reverse-engineering/issues/new?template=board_result.yml) · [report a problem](https://github.com/ShadowsKeep/pcb-reverse-engineering/issues/new?template=bug_report.yml) · [ask a question](https://github.com/ShadowsKeep/pcb-reverse-engineering/discussions). If it is useful to you, a star helps others find it.
+
 ## What you get
 
 | Result | File |
@@ -102,6 +104,16 @@ Scroll to zoom, drag to move, `C` shows the copper map, `Ctrl+Z` undoes. Every c
 4. **Detect.** Solder mask is strongly green and everything on it is not. Vias are a dark hole in a bright ring; test pads are evenly bright discs; parts are black or tan bodies.
 5. **Cross-check.** A via must appear on both sides, which gives an objective test of the via lists.
 6. **Traces.** Copper under the mask is lighter than bare board. Touching copper forms islands; islands are linked through vias and pads.
+
+## Feedback
+
+This has been tested on one board so far, so results from other boards are the most useful thing you can share.
+
+- [How it worked on my board](https://github.com/ShadowsKeep/pcb-reverse-engineering/issues/new?template=board_result.yml): a short form, good or bad results both welcome
+- [Something went wrong](https://github.com/ShadowsKeep/pcb-reverse-engineering/issues/new?template=bug_report.yml): paste the last lines the script printed
+- [Ideas](https://github.com/ShadowsKeep/pcb-reverse-engineering/issues/new?template=feature_request.yml) and [questions or show-and-tell](https://github.com/ShadowsKeep/pcb-reverse-engineering/discussions)
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for pull requests. Only share photos of boards you are allowed to share.
 
 ## Privacy
 

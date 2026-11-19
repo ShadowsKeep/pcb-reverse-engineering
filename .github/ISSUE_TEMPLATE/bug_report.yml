@@ -1,0 +1,49 @@
+name: Something went wrong
+description: A script failed, gave a wrong result, or the plugin did not load.
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting this. **Do not attach photos of boards you are not allowed to share** (work, customer or confidential hardware). A description is enough.
+  - type: dropdown
+    id: step
+    attributes:
+      label: Which step?
+      options:
+        - Installing the plugin
+        - rectify_photo.py (flattening the whole-board photo)
+        - trace_outline.py (outline and holes)
+        - match_photos.py (matching close-ups)
+        - build_grid_map.py (block maps)
+        - check_blocks.py
+        - find_features.py (vias, test pads, parts)
+        - review_tool.py (the editor)
+        - suggest_vias.py
+        - map_traces.py / trace following
+        - export_kicad.py
+        - Something else
+    validations:
+      required: true
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened, and what did you expect?
+    validations:
+      required: true
+  - type: textarea
+    id: output
+    attributes:
+      label: Error message or output
+      description: Paste the last lines the script printed.
+      render: text
+  - type: input
+    id: system
+    attributes:
+      label: System
+      placeholder: e.g. Windows 11, Python 3.12, KiCad 9
+  - type: input
+    id: board
+    attributes:
+      label: Board
+      placeholder: e.g. green mask, 2 layers, about 50 x 80 mm, 90 close-ups

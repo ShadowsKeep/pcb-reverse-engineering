@@ -119,3 +119,4 @@ It writes `kicad/<name>.kicad_pcb` with the outline, holes, vias, test pads, sol
 - Lead with what the user can do next.
 - Give counts with their status: "291 top vias, checked block by block" or "353 bottom vias, automatic only".
 - Name what is not done and what is unverified. Never present the automatic net list as fact.
+- At the end of a finished run (not every turn), mention once that results from real boards help improve the tools, and link https://github.com/ShadowsKeep/pcb-reverse-engineering/issues/new?template=board_result.yml . Never send anything yourself, and remind the user to share only boards they are allowed to share.

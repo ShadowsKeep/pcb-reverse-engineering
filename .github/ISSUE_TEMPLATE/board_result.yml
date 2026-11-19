@@ -1,0 +1,45 @@
+name: How it worked on my board
+description: Tell us how well it did on your board, good or bad. This is the most useful feedback there is.
+labels: [board-result]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Every board is different, and results from real boards are how this gets better. Short answers are fine.
+        **Only share pictures of boards you are allowed to share.**
+  - type: input
+    id: board
+    attributes:
+      label: The board
+      placeholder: e.g. hobby motor controller, green mask, 2 layers, 60 x 40 mm
+    validations:
+      required: true
+  - type: dropdown
+    id: mask
+    attributes:
+      label: Solder mask colour
+      options: [Green, Black, Blue, Red, White, Yellow, Purple, Other]
+    validations:
+      required: true
+  - type: input
+    id: photos
+    attributes:
+      label: Photos
+      placeholder: e.g. phone camera, 2 overviews + 80 close-ups, about 60 matched
+  - type: checkboxes
+    id: worked
+    attributes:
+      label: What worked well enough to use?
+      options:
+        - label: Flattening the whole-board photos
+        - label: Matching the close-ups
+        - label: The block maps (sharp enough to read traces)
+        - label: Via detection
+        - label: Test pad and part detection
+        - label: The review editor
+        - label: The copper picture / trace following
+        - label: The KiCad export
+  - type: textarea
+    id: notes
+    attributes:
+      label: What did not work, or what would have helped?
