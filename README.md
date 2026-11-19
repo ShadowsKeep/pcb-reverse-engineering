@@ -17,6 +17,8 @@ Useful for repairing a board with no schematic, documenting old hardware, clonin
 | Copper traces separated from bare board and tinted island by island | `maps/top-copper.jpg`, `maps/bottom-copper.jpg` |
 | A KiCad board: outline, holes, vias, pads, and both photos as locked underlays | `kicad/<name>.kicad_pcb` |
 | A browser editor to correct the lists and follow a trace by clicking it | `review_tool.py` |
+| A picture of every chip cut from the sharpest close-up, and a list of what each one is | `work/parts/`, `data/markings.csv` |
+| Datasheet pin names on the pads in KiCad and in the editor | `data/pinouts.csv`, `data/pins/*.csv` |
 
 ## Be clear about the limits
 
@@ -74,7 +76,8 @@ Run the scripts from that folder, in this order:
 | 8 | `python scripts/review_tool.py` | Correct the lists in your browser |
 | 9 | `python scripts/suggest_vias.py --side bottom` | Checks each side's vias against the other side |
 | 10 | `python scripts/map_traces.py` | Copper pictures and the experimental net list |
-| 11 | `<KiCad's python> scripts/export_kicad.py` | The KiCad board file |
+| 11 | `python scripts/crop_parts.py --rotate` | A picture of each chip for reading its marking; see below |
+| 12 | `<KiCad's python> scripts/export_kicad.py` | The KiCad board file |
 
 (`scripts/` here means the `scripts` folder of this repository; give its full path if your project is elsewhere.)
 
@@ -107,6 +110,16 @@ The picture cannot see copper under parts or inside the board, so the connection
 - **KiCad:** `export_kicad.py` turns readings between chip pins into nets, so KiCad draws them as ratsnest lines to trace along.
 
 Clean flux off the board before measuring: flux residue can make the meter beep where there is no connection.
+
+## Identifying the chips
+
+`crop_parts.py` cuts every chip and larger part out of the close-ups, picking the photos with the clearest detail at the size of printed text and skipping photos that do not line up at that spot. You get `work/parts/<id>.png` (plus `-photo2`, `-photo3` from other photos, and a four-angle strip with `--rotate`) and contact sheets of 12 parts. Bottom-side parts are flipped back so the text reads normally.
+
+It also keeps `data/markings.csv`, one row per part, with columns for the marking, part number, maker, package, function, confidence, datasheet link and a note. Claude fills these in by reading the pictures and looking up the codes; re-running the script keeps them.
+
+Short SMD codes (two or three characters, such as `1A` or `A7`) are reused by many makers, so an identification from a code alone is a probable match, not proof. The confidence column says which is which.
+
+**Pin names:** write a chip's datasheet pin table as `data/pins/<part>.csv` (columns `pin,function`) and link it in `data/pinouts.csv` (columns `ref,pins_file`). The KiCad export puts the names on the pads, `known-pads.csv` gets a `function` column, and the editor shows them next to pin labels, such as "U1 pin 1 (VDD)".
 
 ## How it works
 

@@ -317,7 +317,8 @@ function note(t,bad){ const e=$('saved'); e.textContent=t; e.classList.toggle('b
 function take(d){
   S.auto=d.auto.map(a=>({id:a.id,side:a.side,kind:a.kind,x:+a.x_mm,y:+a.y_mm,w:+a.w_mm,h:+a.h_mm}));
   S.review=d.review; S.known=d.known; S.boxes=d.boxes; S.version=d.version;
-  S.pins=(d.pins||[]).map(p=>({ref:p.ref,pad:p.pad,side:p.side,x:+p.x_mm,y:+p.y_mm,w:+p.w_mm,h:+p.h_mm}));
+  S.pins=(d.pins||[]).map(p=>({ref:p.ref,pad:p.pad,side:p.side,x:+p.x_mm,y:+p.y_mm,w:+p.w_mm,h:+p.h_mm,fn:p.function||''}));
+  S.fn={}; for(const p of S.pins) if(p.fn) S.fn[p.ref+' pin '+p.pad]=p.fn;
   S.probes=d.probes||[]; S.probeVersion=d.probe_version||'0';
   const refs=[...new Set(S.pins.map(p=>p.ref))].sort();
   for(const id of ['planFrom','planTo']){ const sel=$(id), keep=sel.value; sel.innerHTML=refs.map(r=>`<option>${r}</option>`).join(''); if(refs.includes(keep)) sel.value=keep; }
@@ -513,14 +514,16 @@ function probeClick(mx,my){
   showProbe(); draw();
 }
 function esc(t){ return String(t).replace(/&/g,'&amp;').replace(/</g,'&lt;'); }
+// a pin label with its datasheet name, for showing only (saved labels stay "U1 pin 1")
+function nice(label){ const f=S.fn&&S.fn[label]; return f? label+' ('+(f.length>28?f.slice(0,27)+'\u2026':f)+')' : label; }
 function showProbe(){
   const t=$('probe');
   if(!S.pA){ t.className='dim'; t.textContent='Choose "Record a continuity check", click the first point, then the second. You can switch sides in between.'; return; }
   t.className='';
-  if(!S.pB){ t.innerHTML=`<p>First point: <b>${esc(S.pA.label)}</b></p><p class="dim">Now click the second point.</p><div class="row"><button id="pCancel">Cancel <kbd>Esc</kbd></button></div>`; }
+  if(!S.pB){ t.innerHTML=`<p>First point: <b>${esc(nice(S.pA.label))}</b></p><p class="dim">Now click the second point.</p><div class="row"><button id="pCancel">Cancel <kbd>Esc</kbd></button></div>`; }
   else{
     const done=S.probes.find(p=>(p.a_label===S.pA.label&&p.b_label===S.pB.label)||(p.a_label===S.pB.label&&p.b_label===S.pA.label));
-    t.innerHTML=`<p><b>${esc(S.pA.label)}</b><br>to <b>${esc(S.pB.label)}</b></p>
+    t.innerHTML=`<p><b>${esc(nice(S.pA.label))}</b><br>to <b>${esc(nice(S.pB.label))}</b></p>
       ${done?`<p class="dim">Already recorded: ${done.result==='connected'?'connected':'not connected'}. Recording again replaces it.</p>`:''}
       <div class="col"><button id="pYes" class="on" style="background:#2e7d4f;border-color:#2e7d4f;color:#fff">Beeps: connected <kbd>Y</kbd></button>
       <button id="pNo">No beep: not connected <kbd>N</kbd></button></div>
@@ -555,7 +558,7 @@ function listProbes(){
   if(!S.probes.length){ L.innerHTML='<p class="dim">No readings yet.</p>'; return; }
   const c=S.probes.filter(p=>p.result==='connected').length;
   L.innerHTML=`<p class="dim">${S.probes.length} reading${S.probes.length===1?'':'s'}: ${c} connected, ${S.probes.length-c} not connected</p>`+
-    S.probes.slice().reverse().map(p=>`<div class="pr"><span><span class="${p.result==='connected'?'ok':'no'}">${p.result==='connected'?'&#10003;':'&#10007;'}</span> ${esc(p.a_label)} &ndash; ${esc(p.b_label)}${p.ohms?' ('+esc(p.ohms)+' &Omega;)':''}</span><button data-del="${esc(p.id)}" title="Delete this reading">&times;</button></div>`).join('');
+    S.probes.slice().reverse().map(p=>`<div class="pr"><span><span class="${p.result==='connected'?'ok':'no'}">${p.result==='connected'?'&#10003;':'&#10007;'}</span> ${esc(nice(p.a_label))} &ndash; ${esc(nice(p.b_label))}${p.ohms?' ('+esc(p.ohms)+' &Omega;)':''}</span><button data-del="${esc(p.id)}" title="Delete this reading">&times;</button></div>`).join('');
   L.querySelectorAll('button[data-del]').forEach(b=>b.onclick=()=>{ S.probeUndo=JSON.stringify(S.probes); S.probes=S.probes.filter(p=>p.id!==b.dataset.del); listProbes(); pushProbes(); draw(); });
 }
 async function checkProbes(){
@@ -578,8 +581,8 @@ async function makePlan(){
   const done=(pin)=>S.probes.filter(p=>p.result==='connected'&&(p.a_label===from+' pin '+pin||p.b_label===from+' pin '+pin)&&(p.a_label.startsWith(to+' pin ')||p.b_label.startsWith(to+' pin ')));
   t.innerHTML=`<p class="dim">Put one probe on each ${esc(from)} pin. Check the suggested ${esc(to)} pins first, then sweep the rest. Suggestions come from the picture and can be wrong.</p>`+
     d.plan.map(p=>{ const m=done(p.pin), n=p.suggested.length;
-      const what = m.length?'<span class="ok">measured</span>' : n>4?`<span class="dim">picture unclear (it joins ${n} ${esc(to)} pins), sweep all</span>` : n?'check '+esc(to)+' pin '+p.suggested.map(esc).join(', ')+' first':'<span class="dim">no suggestion, sweep all</span>';
-      return `<p>${esc(from)} pin <b>${esc(p.pin)}</b>: ${what} <a data-pin="${esc(p.pin)}">start</a></p>`; }).join('');
+      const what = m.length?'<span class="ok">measured</span>' : n>4?`<span class="dim">picture unclear (it joins ${n} ${esc(to)} pins), sweep all</span>` : n?'check '+p.suggested.map(q=>esc(nice(to+' pin '+q))).join(', ')+' first':'<span class="dim">no suggestion, sweep all</span>';
+      return `<p>${esc(nice(from+' pin '+p.pin))}: ${what} <a data-pin="${esc(p.pin)}">start</a></p>`; }).join('');
   t.querySelectorAll('a[data-pin]').forEach(a=>a.onclick=()=>{
     const p=d.plan.find(q=>q.pin===a.dataset.pin);
     if(p.side!==S.side) setSide(p.side);
@@ -622,7 +625,7 @@ cv.addEventListener('mousedown',e=>{
 });
 window.addEventListener('mousemove',e=>{
   const [px,py]=pos(e), [mx,my]=toMm(px,py);
-  $('status').textContent = `x ${mx.toFixed(2)} mm   y ${my.toFixed(2)} mm   block c${Math.floor(mx/10)} r${Math.floor(my/10)}`+(S.mode==='probe'&&!S.drag?'   '+endpointAt(mx,my).label:'');
+  $('status').textContent = `x ${mx.toFixed(2)} mm   y ${my.toFixed(2)} mm   block c${Math.floor(mx/10)} r${Math.floor(my/10)}`+(S.mode==='probe'&&!S.drag?'   '+nice(endpointAt(mx,my).label):'');
   if(S.drag && e.buttons===0){ S.drag=null; draw(); return; }          // the button was let go somewhere we could not see
   if(S.drag&&S.drag.type==='pan'){ if(Math.hypot(px-S.drag.px,py-S.drag.py)>4) S.drag.moved=true;
     if(S.drag.moved){ S.view.x=S.drag.vx+px-S.drag.px; S.view.y=S.drag.vy+py-S.drag.py; draw(); } return; }

@@ -15,6 +15,9 @@ Reads (data/ in your project; only outline.csv is required):
                                  directions: U D L R TL TR BL BR, as seen from the top
   placeholders.csv  optional: name, x0_mm, y0_mm, x1_mm, y1_mm  boxes for parts with no footprint yet
   netmap.csv        optional: net, ref, pin  connections you are sure of
+  pinouts.csv       optional: ref, pins_file  which datasheet pin list belongs to which chip;
+                    pins_file is a CSV in data/pins/ with columns pin, function. The names
+                    are put on the pads, so KiCad shows "VDD" rather than just "1"
   probes.csv        optional: multimeter readings recorded in review_tool.py; pins that beeped
                     together share a net (named from netmap.csv where they meet one, else MEASn)
   maps/top-underlay.jpg, bottom-underlay.jpg   embedded as tracing layers (or the flattened overviews)
@@ -24,6 +27,7 @@ Writes
                             and both photos as locked underlays on layers Photo.Top / Photo.Bottom
   data/known-parts.csv      the box each placed part covers (other scripts keep clear of these)
   data/known-pads.csv       every pad of the placed parts, with its net if netmap.csv names one
+                            and its datasheet name if pinouts.csv gives one
 
 No copper traces are generated: trace them in KiCad over the photo underlays.
 """
@@ -142,6 +146,20 @@ def single_pad(board, ref, value, lib_name, shape, w, h, x, y, side):
         fp.Flip(fp.GetPosition(), pcbnew.FLIP_DIRECTION_LEFT_RIGHT)
 
 
+def pin_names():
+    """{(ref, pin): name} from data/pinouts.csv and the pin lists in data/pins/."""
+    names = {}
+    for r in rows("pinouts.csv"):
+        f = os.path.join(BD.DATA, "pins", r["pins_file"])
+        if not os.path.exists(f):
+            print("pinouts.csv: %s names %s, which does not exist in data/pins/" % (r["ref"], r["pins_file"]))
+            continue
+        with open(f, newline="", encoding="utf-8") as fh:
+            for q in csv.DictReader(fh):
+                names[(r["ref"], q["pin"].strip())] = q["function"].strip()
+    return names
+
+
 def image_size(path):
     """JPEG width and height without Pillow (KiCad's Python may not have it)."""
     with open(path, "rb") as fh:
@@ -243,6 +261,21 @@ def main():
                 pad.SetNet(nets[name])
                 pad_net[(ref, pin)] = name
 
+    # datasheet pin names (data/pinouts.csv -> data/pins/*.csv), shown on the pads in KiCad
+    names = pin_names()
+    n_named = 0
+    for ref, fp in placed.items():
+        nums = {p.GetNumber() for p in fp.Pads() if p.GetNumber()}
+        listed = {k[1] for k in names if k[0] == ref}
+        if listed and listed != nums:
+            print("pin list for %s has %d pins, its footprint %d: check the pin list" % (ref, len(listed), len(nums)))
+        for p in fp.Pads():
+            if (ref, p.GetNumber()) in names:
+                p.SetPinFunction(names[(ref, p.GetNumber())])
+                n_named += 1
+    if names:
+        print("datasheet pin names put on %d pads" % n_named)
+
     # measured connections (data/probes.csv, recorded in the review tool): pins that beeped
     # together become one net, so KiCad draws ratsnest lines between them
     parent = {}
@@ -295,7 +328,7 @@ def main():
                                              pcbnew.ToMM(bb.GetRight()) - OX, pcbnew.ToMM(bb.GetBottom()) - OY)])
     with open(os.path.join(BD.DATA, "known-pads.csv"), "w", newline="") as fh:
         w = csv.writer(fh)
-        w.writerow(["ref", "pad", "side", "x_mm", "y_mm", "w_mm", "h_mm", "part_x_mm", "part_y_mm", "net"])
+        w.writerow(["ref", "pad", "side", "x_mm", "y_mm", "w_mm", "h_mm", "part_x_mm", "part_y_mm", "net", "function"])
         for ref in sorted(placed):
             fp = placed[ref]
             pads = [p for p in fp.Pads() if p.GetNumber()]
@@ -306,7 +339,8 @@ def main():
                 w.writerow([ref, p.GetNumber(), "bottom" if fp.IsFlipped() else "top",
                             "%.3f" % (pcbnew.ToMM(p.GetPosition().x) - OX), "%.3f" % (pcbnew.ToMM(p.GetPosition().y) - OY),
                             "%.3f" % pcbnew.ToMM(bb.GetWidth()), "%.3f" % pcbnew.ToMM(bb.GetHeight()),
-                            "%.3f" % (pcbnew.ToMM(cx) - OX), "%.3f" % (pcbnew.ToMM(cy) - OY), pad_net.get((ref, p.GetNumber()), "")])
+                            "%.3f" % (pcbnew.ToMM(cx) - OX), "%.3f" % (pcbnew.ToMM(cy) - OY), pad_net.get((ref, p.GetNumber()), ""),
+                            names.get((ref, p.GetNumber()), "")])
 
     board.GetDesignSettings().SetAuxOrigin(pt(0, 0))
     pcbnew.SaveBoard(out, board)

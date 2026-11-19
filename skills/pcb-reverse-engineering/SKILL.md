@@ -111,7 +111,29 @@ The trace picture is a guide; the connection map has to come from a multimeter. 
 - Remind the user to clean flux off first: residue gives false beeps.
 - Never record readings yourself; they must come from the user's meter.
 
-## 9. Export to KiCad
+## 9. Identify the chips
+
+```
+python "${CLAUDE_PLUGIN_ROOT}/scripts/crop_parts.py" --rotate
+```
+
+Cuts every chip and larger part out of the close-ups (from `data/known-parts.csv`, `placeholders.csv` and `components.csv`) into `work/parts/`: one picture per part, up to two more from other photos (`-photo2`, `-photo3`), a four-angle strip (`-rotations`), and `sheet-N.jpg` with 12 parts each. It adds one row per part to `data/markings.csv` and never overwrites the reading columns.
+
+Then, for each part:
+
+1. Look at the sheets first, then the single crops and rotations where text is unclear. Bottom-side crops are already flipped back.
+2. Write what you read in `marking`, exactly as seen; mark unsure characters with `?`. Do not "correct" a marking towards a part you expect.
+3. Look the code up: full part numbers in the maker's catalogue; short SMD codes (2 to 4 characters on SOT-23, SOD-123 and similar) in SMD marking-code lists, filtered by package. Many makers reuse the same short code, so check that the package and pin count match.
+4. Fill `part_number`, `manufacturer`, `package`, `function`, `datasheet` (a link you actually opened), `note` and `confidence`:
+   - `high`: full part number legible, or a code that matches one part in the right package
+   - `medium`: code and package match a common part, but other parts share the code
+   - `low`: partly legible, or the match fits the code but not the package
+   - `none`: not a single part, or nothing visible
+5. For chips the user wants pin names on, write the datasheet pin table to `data/pins/<part>.csv` (columns `pin,function`) and add a row `ref,pins_file` to `data/pinouts.csv`. The KiCad export puts the names on the pads and the editor shows them next to pin labels, for example "U1 pin 1 (VDD)". Check that the pin count matches the footprint; the export warns if not.
+
+Never present a `medium` or `low` identification as fact. List the unreadable parts and say what would help: a sharper straight-on close-up in even light, or the user reading the part with a loupe.
+
+## 10. Export to KiCad
 
 Run with KiCad's own Python (it has the `pcbnew` module), for example:
 
@@ -121,7 +143,7 @@ Run with KiCad's own Python (it has the `pcbnew` module), for example:
 
 On macOS use `/Applications/KiCad/KiCad.app/Contents/Frameworks/Python.framework/Versions/Current/bin/python3`; on Linux the system `python3` usually has `pcbnew`.
 
-Readings between chip pins become nets (KiCad shows them as ratsnest lines). It writes `kicad/<name>.kicad_pcb` with the outline, holes, vias, test pads, solder pads, an outline per small part, and both maps as locked underlays on layers `Photo.Top` and `Photo.Bottom`. Parts the user has identified go in `data/placement.csv` with a KiCad footprint each (the format is in the script's header). No traces are generated: the user traces them in KiCad over the photos.
+Readings between chip pins become nets (KiCad shows them as ratsnest lines), and datasheet pin names from `data/pinouts.csv` go on the pads. It writes `kicad/<name>.kicad_pcb` with the outline, holes, vias, test pads, solder pads, an outline per small part, and both maps as locked underlays on layers `Photo.Top` and `Photo.Bottom`. Parts the user has identified go in `data/placement.csv` with a KiCad footprint each (the format is in the script's header). No traces are generated: the user traces them in KiCad over the photos.
 
 ## Reporting
 

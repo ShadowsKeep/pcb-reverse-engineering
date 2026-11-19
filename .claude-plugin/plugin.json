@@ -1,6 +1,6 @@
 {
   "name": "pcb-reverse-engineering",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "Reverse engineer a PCB from phone photos: stitch close-ups into a to-scale board map, find vias, test pads and components, follow copper traces, review in a browser editor, and export to KiCad.",
   "author": { "name": "ShadowsKeep" },
   "homepage": "https://github.com/ShadowsKeep/pcb-reverse-engineering",
