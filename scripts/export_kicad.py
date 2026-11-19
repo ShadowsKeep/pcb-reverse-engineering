@@ -15,6 +15,8 @@ Reads (data/ in your project; only outline.csv is required):
                                  directions: U D L R TL TR BL BR, as seen from the top
   placeholders.csv  optional: name, x0_mm, y0_mm, x1_mm, y1_mm  boxes for parts with no footprint yet
   netmap.csv        optional: net, ref, pin  connections you are sure of
+  probes.csv        optional: multimeter readings recorded in review_tool.py; pins that beeped
+                    together share a net (named from netmap.csv where they meet one, else MEASn)
   maps/top-underlay.jpg, bottom-underlay.jpg   embedded as tracing layers (or the flattened overviews)
 
 Writes
@@ -240,6 +242,47 @@ def main():
             if pad.GetNumber() == pin:
                 pad.SetNet(nets[name])
                 pad_net[(ref, pin)] = name
+
+    # measured connections (data/probes.csv, recorded in the review tool): pins that beeped
+    # together become one net, so KiCad draws ratsnest lines between them
+    parent = {}
+
+    def find(a):
+        parent.setdefault(a, a)
+        while parent[a] != a:
+            parent[a] = parent[parent[a]]
+            a = parent[a]
+        return a
+
+    def pin_of(label):
+        ref, _, pin = label.partition(" pin ")
+        return (ref, pin) if pin and ref in placed else None
+
+    for r in rows("probes.csv"):
+        a, b = pin_of(r["a_label"]), pin_of(r["b_label"])
+        if r["result"] == "connected" and a and b:
+            parent[find(a)] = find(b)
+    groups = {}
+    for k in list(parent):
+        groups.setdefault(find(k), []).append(k)
+    pads_by = {(ref, p.GetNumber()): p for ref, fp in placed.items() for p in fp.Pads() if p.GetNumber()}
+    n_meas = 0
+    for i, members in enumerate(sorted(groups.values()), 1):
+        named = {pad_net[m] for m in members if m in pad_net}
+        if len(named) > 1:
+            print("measured connection joins two known nets %s: check those readings" % sorted(named))
+            continue
+        name = named.pop() if named else "MEAS%d" % i
+        if name not in nets:
+            nets[name] = pcbnew.NETINFO_ITEM(board, name)
+            board.Add(nets[name])
+        for m in members:
+            if m in pads_by and m not in pad_net:
+                pads_by[m].SetNet(nets[name])
+                pad_net[m] = name
+                n_meas += 1
+    if groups:
+        print("measured connections: %d pads put on nets from probes.csv" % n_meas)
 
     # lists the other scripts use to keep clear of, and to name, the placed parts
     with open(os.path.join(BD.DATA, "known-parts.csv"), "w", newline="") as fh:

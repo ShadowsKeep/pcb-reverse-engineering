@@ -102,7 +102,16 @@ Writes `maps/top-copper.jpg` and `maps/bottom-copper.jpg` (each island of copper
 
 The script checks itself against nets the user is sure of. Ask for two or more, for example the power and ground pins of a chip from its datasheet, and put them in the `net` column of `data/known-pads.csv` (or in `data/netmap.csv` before exporting to KiCad). **Report the self-check result as it is.** If it fails or cannot run, say the net list is unverified and should not be used.
 
-## 8. Export to KiCad
+## 8. Measure connections
+
+The trace picture is a guide; the connection map has to come from a multimeter. In the editor, "Record a continuity check" (key M) stores readings in `data/probes.csv`: the user clicks the two points probed and presses Y (beeped) or N.
+
+- Suggest the probe plan: pick two parts (a connector and the chip it serves) and check the suggested pins first. When the plan says the picture is unclear, the user sweeps all pins.
+- "Compare with the picture" reports how many readings the picture agrees with. Report that number as a measure of how far the picture can be trusted on this board.
+- Remind the user to clean flux off first: residue gives false beeps.
+- Never record readings yourself; they must come from the user's meter.
+
+## 9. Export to KiCad
 
 Run with KiCad's own Python (it has the `pcbnew` module), for example:
 
@@ -112,7 +121,7 @@ Run with KiCad's own Python (it has the `pcbnew` module), for example:
 
 On macOS use `/Applications/KiCad/KiCad.app/Contents/Frameworks/Python.framework/Versions/Current/bin/python3`; on Linux the system `python3` usually has `pcbnew`.
 
-It writes `kicad/<name>.kicad_pcb` with the outline, holes, vias, test pads, solder pads, an outline per small part, and both maps as locked underlays on layers `Photo.Top` and `Photo.Bottom`. Parts the user has identified go in `data/placement.csv` with a KiCad footprint each (the format is in the script's header). No traces are generated: the user traces them in KiCad over the photos.
+Readings between chip pins become nets (KiCad shows them as ratsnest lines). It writes `kicad/<name>.kicad_pcb` with the outline, holes, vias, test pads, solder pads, an outline per small part, and both maps as locked underlays on layers `Photo.Top` and `Photo.Bottom`. Parts the user has identified go in `data/placement.csv` with a KiCad footprint each (the format is in the script's header). No traces are generated: the user traces them in KiCad over the photos.
 
 ## Reporting
 

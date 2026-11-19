@@ -9,6 +9,12 @@ what it joins. Every change is saved straight away to data/review.csv (a backup,
 review.csv.bak, is kept), and the final lists (vias.csv, testpads.csv, pads.csv,
 components.csv) are rewritten.
 
+"Record a continuity check" stores multimeter readings in data/probes.csv: click two
+points (a chip pin, via, pad or any spot), then say whether the meter beeped. "Compare with
+the picture" shows how many readings the trace picture agrees with, and the probe plan lists
+which pins of one part to check against another first. export_kicad.py turns connected readings
+into nets, so KiCad draws them as ratsnest lines.
+
 If review.csv is changed by something else while the page is open, the editor notices,
 reloads the list and asks you to redo your last change, so nothing is overwritten.
 
@@ -40,6 +46,9 @@ PCB = BD.DATA
 MAPS = BD.MAPS
 REVIEW = os.path.join(PCB, "review.csv")
 FIELDS = ["action", "side", "kind", "id", "x_mm", "y_mm", "w_mm", "h_mm", "note"]
+PROBES = os.path.join(PCB, "probes.csv")
+PROBE_FIELDS = ["id", "a_side", "a_x_mm", "a_y_mm", "a_label", "b_side", "b_x_mm", "b_y_mm", "b_label",
+                "result", "ohms", "note", "time"]
 LOCK = threading.Lock()
 
 
@@ -51,14 +60,31 @@ def read_csv(name):
         return list(csv.DictReader(fh))
 
 
-def version():
-    return str(os.stat(REVIEW).st_mtime_ns) if os.path.exists(REVIEW) else "0"
+def version(path=REVIEW):
+    return str(os.stat(path).st_mtime_ns) if os.path.exists(path) else "0"
 
 
 def state():
     with LOCK:
         return dict(auto=read_csv("features-auto.csv"), review=read_csv("review.csv"),
-                    known=read_csv("known-parts.csv"), boxes=read_csv("placeholders.csv"), version=version())
+                    known=read_csv("known-parts.csv"), boxes=read_csv("placeholders.csv"), version=version(),
+                    pins=read_csv("known-pads.csv"), probes=read_csv("probes.csv"), probe_version=version(PROBES))
+
+
+def save_probes(rows, base):
+    """Same rules as save_review, for the multimeter readings."""
+    with LOCK:
+        if base != version(PROBES):
+            return False, version(PROBES)
+        if os.path.exists(PROBES):
+            shutil.copyfile(PROBES, PROBES + ".bak")
+        with open(PROBES + ".tmp", "w", newline="") as fh:
+            w = csv.DictWriter(fh, fieldnames=PROBE_FIELDS, lineterminator="\n")
+            w.writeheader()
+            for r in rows:
+                w.writerow({k: (str(r.get(k)) if r.get(k) is not None else "") for k in PROBE_FIELDS})
+        os.replace(PROBES + ".tmp", PROBES)
+        return True, version(PROBES)
 
 
 def save_review(rows, base):
@@ -138,6 +164,20 @@ class Handler(BaseHTTPRequestHandler):
             except Exception as e:  # keep the editor alive whatever happens in here
                 out = dict(ok=False, reason="Trace following failed: %s" % e)
             self.send(200, json.dumps(out), "application/json")
+        elif path in ("/api/probecheck", "/api/probeplan"):
+            q = urllib.parse.parse_qs(self.path.partition("?")[2])
+            try:
+                g = TRACER.get()
+                if path == "/api/probecheck":
+                    out = TRACER.mod.check_probes(g, read_csv("probes.csv"))
+                else:
+                    out = TRACER.mod.probe_plan(g, read_csv("known-pads.csv"), q["from"][0], q["to"][0])
+                out["built"] = TRACER.built
+            except ImportError as e:
+                out = dict(ok=False, reason="This needs numpy and Pillow (%s)." % e)
+            except Exception as e:
+                out = dict(ok=False, reason="Failed: %s" % e)
+            self.send(200, json.dumps(out), "application/json")
         elif path in ("/copper/top.jpg", "/copper/bottom.jpg"):
             f = os.path.join(MAPS, "%s-copper.jpg" % path[8:-4])
             if not os.path.exists(f):
@@ -156,7 +196,7 @@ class Handler(BaseHTTPRequestHandler):
             self.send(404, "not found", "text/plain")
 
     def do_POST(self):
-        if self.path != "/api/review":
+        if self.path not in ("/api/review", "/api/probes"):
             self.send(404, "not found", "text/plain")
             return
         origin = self.headers.get("Origin")
@@ -170,7 +210,7 @@ class Handler(BaseHTTPRequestHandler):
         except Exception:
             self.send(409, json.dumps(dict(ok=False, reason="old page")), "application/json")
             return
-        ok, new = save_review(rows, base)
+        ok, new = (save_probes if self.path == "/api/probes" else save_review)(rows, base)
         self.send(200 if ok else 409, json.dumps(dict(ok=ok, version=new)), "application/json")
 
 
@@ -202,6 +242,11 @@ kbd{background:#0d1012;border:1px solid var(--line);border-radius:4px;padding:0 
 #saved{position:absolute;right:10px;bottom:10px;max-width:60%;background:rgba(0,0,0,.72);padding:5px 9px;border-radius:6px;font-size:13px;pointer-events:none}
 #saved.bad{background:#b3261e;color:#fff;font-weight:600}
 label{display:flex;align-items:center;gap:7px;margin:4px 0}
+select,input[type=number]{background:#0d1012;color:var(--text);border:1px solid var(--line);border-radius:6px;padding:6px;font:inherit}
+.pr{display:flex;justify-content:space-between;gap:6px;padding:3px 0;border-bottom:1px solid #2a3137;font-size:13px}
+.pr button{padding:0 6px}
+.ok{color:#3ddc84}.no{color:#ff8a80}.plan p{margin:3px 0}
+.plan a{color:var(--accent);cursor:pointer}
 .dim{color:var(--dim)}
 p{margin:6px 0}
 </style></head><body>
@@ -220,7 +265,18 @@ p{margin:6px 0}
     <button data-mode="part"><span class="sw sq" style="border-color:#ffe600"></span>Add a part (drag a box) <kbd>P</kbd></button>
     <button data-mode="delete">Remove items <kbd>D</kbd></button>
     <button data-mode="trace">Follow a trace <kbd>W</kbd></button>
+    <button data-mode="probe"><span class="sw" style="border-color:#3ddc84"></span>Record a continuity check <kbd>M</kbd></button>
   </div>
+
+  <h2>Continuity checks</h2>
+  <div id="probe" class="dim">Choose "Record a continuity check", click the first point, then the second. You can switch sides in between.</div>
+  <label><input type="checkbox" id="showProbes" checked> Show readings on the board</label>
+  <div class="row" style="margin-top:6px"><button id="bCheck">Compare with the picture</button></div>
+  <div id="probeCheck" class="dim"></div>
+  <p class="dim" style="margin-top:10px">Probe plan: which pins to check first</p>
+  <div class="row"><select id="planFrom"></select><span class="dim">to</span><select id="planTo"></select><button id="bPlan">Plan</button></div>
+  <div id="planOut" class="dim"></div>
+  <div id="probeList" style="margin-top:8px"></div>
 
   <h2>Trace</h2>
   <div id="trace" class="dim">Choose "Follow a trace", then click a piece of copper.</div>
@@ -253,18 +309,24 @@ const COL={via:'#00ffff',testpad:'#ff40ff',pad:'#ff9a3c',part:'#ffe600'};
 const NAME={via:'via',testpad:'test pad',pad:'solder pad',part:'part'};
 const BOXY={pad:true,part:true};
 const cv=document.getElementById('cv'), ctx=cv.getContext('2d');
-const S={side:'top',mode:'select',auto:[],review:[],known:[],boxes:[],img:{},view:{s:10,x:0,y:0},views:{},sel:null,undo:[],hover:null,drag:null,space:false,version:'0',needFit:true};
+const S={side:'top',mode:'select',auto:[],review:[],known:[],boxes:[],img:{},view:{s:10,x:0,y:0},views:{},sel:null,undo:[],hover:null,drag:null,space:false,version:'0',needFit:true,
+  pins:[],probes:[],probeVersion:'0',pA:null,pB:null,planHi:[]};
 const $=id=>document.getElementById(id);
 function note(t,bad){ const e=$('saved'); e.textContent=t; e.classList.toggle('bad',!!bad); }
 
 function take(d){
   S.auto=d.auto.map(a=>({id:a.id,side:a.side,kind:a.kind,x:+a.x_mm,y:+a.y_mm,w:+a.w_mm,h:+a.h_mm}));
   S.review=d.review; S.known=d.known; S.boxes=d.boxes; S.version=d.version;
+  S.pins=(d.pins||[]).map(p=>({ref:p.ref,pad:p.pad,side:p.side,x:+p.x_mm,y:+p.y_mm,w:+p.w_mm,h:+p.h_mm}));
+  S.probes=d.probes||[]; S.probeVersion=d.probe_version||'0';
+  const refs=[...new Set(S.pins.map(p=>p.ref))].sort();
+  for(const id of ['planFrom','planTo']){ const sel=$(id), keep=sel.value; sel.innerHTML=refs.map(r=>`<option>${r}</option>`).join(''); if(refs.includes(keep)) sel.value=keep; }
+  if(refs.length>1&&!$('planFrom').dataset.set){ $('planTo').value=refs[1]; $('planFrom').dataset.set=1; }
 }
 async function load(){
   take(await (await fetch('/api/state')).json());
   for(const side of ['top','bottom']){ const im=new Image(); im.onload=()=>draw(); im.src='/map/'+side+'.jpg'; S.img[side]=im; }
-  setSide('top'); setMode('select'); note('Loaded');
+  setSide('top'); setMode('select'); listProbes(); note('Loaded');
 }
 
 // The list as it stands after the review rows are applied.
@@ -363,6 +425,24 @@ function draw(){
     if(lab||sel||hov){ const t=it.auto?it.key:'added'; ctx.lineWidth=3; ctx.strokeStyle='#000'; ctx.strokeText(t,cx+hw+2,cy-hh+2); ctx.fillStyle=it.removed?'#ff8a80':(COL[it.kind]||'#fff'); ctx.fillText(t,cx+hw+2,cy-hh+2); }
   }
   if(S.drag&&S.drag.type==='box'){ const [a,b]=toScr(S.drag.x0,S.drag.y0),[c,d]=toScr(S.drag.x1,S.drag.y1); ctx.strokeStyle=COL[S.mode]||'#ffe600'; ctx.lineWidth=2; ctx.setLineDash([4,3]); ctx.strokeRect(a,b,c-a,d-b); ctx.setLineDash([]); }
+  drawProbes();
+}
+function drawProbes(){
+  const v=S.view, mark=(x,y,col,r)=>{ const [a,b]=toScr(x,y); ctx.beginPath(); ctx.arc(a,b,r||Math.max(5,0.35*v.s),0,Math.PI*2); ctx.strokeStyle=col; ctx.lineWidth=2.5; ctx.stroke(); return [a,b]; };
+  if(S.mode==='probe'||S.pA){ ctx.lineWidth=1; ctx.strokeStyle='rgba(61,220,132,.55)';
+    for(const p of S.pins){ if(p.side!==S.side) continue; const [a,b]=toScr(p.x-p.w/2,p.y-p.h/2); ctx.strokeRect(a,b,p.w*v.s,p.h*v.s); } }
+  for(const h of S.planHi){ if(h.side===S.side) mark(h.x,h.y,'#ffd400',Math.max(7,0.5*v.s)); }
+  if($('showProbes').checked){
+    ctx.font='bold 11px system-ui';
+    for(const p of S.probes){
+      const col=p.result==='connected'?'#3ddc84':'#ff5c5c', aHere=p.a_side===S.side, bHere=p.b_side===S.side;
+      const A=aHere?mark(+p.a_x_mm,+p.a_y_mm,col):null, B=bHere?mark(+p.b_x_mm,+p.b_y_mm,col):null;
+      if(A&&B){ ctx.beginPath(); ctx.moveTo(A[0],A[1]); ctx.lineTo(B[0],B[1]); ctx.strokeStyle=col; ctx.lineWidth=2; ctx.setLineDash(p.result==='connected'?[]:[6,4]); ctx.stroke(); ctx.setLineDash([]); }
+      else if(A||B){ const P=A||B; ctx.lineWidth=3; ctx.strokeStyle='#000'; const t='to '+(A?p.b_label:p.a_label)+' ('+(A?p.b_side:p.a_side)+')'; ctx.strokeText(t,P[0]+9,P[1]-6); ctx.fillStyle=col; ctx.fillText(t,P[0]+9,P[1]-6); }
+    }
+  }
+  if(S.pA&&S.pA.side===S.side) mark(S.pA.x,S.pA.y,'#ffffff',Math.max(8,0.5*v.s));
+  if(S.pB&&S.pB.side===S.side) mark(S.pB.x,S.pB.y,'#ffffff',Math.max(8,0.5*v.s));
 }
 
 function hit(mx,my){
@@ -401,7 +481,7 @@ function setSide(s){
   if(S.views[s]){ S.view={...S.views[s]}; } else fit();
   refresh();
 }
-function setMode(m){ S.mode=m; document.querySelectorAll('button[data-mode]').forEach(b=>b.classList.toggle('on',b.dataset.mode===m)); cv.style.cursor = m==='select'?'default':(m==='delete'?'not-allowed':(m==='trace'?'pointer':'crosshair')); }
+function setMode(m){ if(m!=='probe'&&S.mode==='probe'){ S.pA=null; S.pB=null; S.planHi=[]; showProbe(); } S.mode=m; document.querySelectorAll('button[data-mode]').forEach(b=>b.classList.toggle('on',b.dataset.mode===m)); cv.style.cursor = m==='select'?'default':(m==='delete'?'not-allowed':(m==='trace'?'pointer':'crosshair')); }
 
 // ---- mouse and keys
 function pos(e){ const r=cv.getBoundingClientRect(); return [e.clientX-r.left,e.clientY-r.top]; }
@@ -412,6 +492,101 @@ function clickAt(mx,my){
   else if(S.mode==='via'){ addItem('via',mx,my,0.6,0.6); }
   else if(S.mode==='testpad'){ addItem('testpad',mx,my,1.0,1.0); }
   else if(S.mode==='trace'){ followTrace(mx,my); }
+  else if(S.mode==='probe'){ probeClick(mx,my); }
+}
+// ---- continuity checks
+function endpointAt(mx,my){
+  let best=null,bd=1e9;
+  for(const p of S.pins){ if(p.side!==S.side) continue;
+    const dx=Math.abs(mx-p.x), dy=Math.abs(my-p.y);
+    if(dx<=p.w/2+0.08&&dy<=p.h/2+0.08){ const d=Math.hypot(dx,dy); if(d<bd){bd=d;best=p;} } }
+  if(best) return {side:S.side,x:best.x,y:best.y,label:best.ref+' pin '+best.pad};
+  const it=hit(mx,my);
+  if(it&&it.kind!=='part'&&!it.removed) return {side:S.side,x:it.x,y:it.y,label:(NAME[it.kind]||it.kind)+' '+(it.auto?it.key:'(added)')+' at '+it.x.toFixed(1)+', '+it.y.toFixed(1)};
+  return {side:S.side,x:mx,y:my,label:'point '+mx.toFixed(2)+', '+my.toFixed(2)+' ('+S.side+')'};
+}
+function probeClick(mx,my){
+  if(mx<0||my<0||mx>BW||my>BH) return;
+  const e=endpointAt(mx,my);
+  if(!S.pA||S.pB){ S.pA=e; S.pB=null; }
+  else { if(e.side===S.pA.side&&Math.hypot(e.x-S.pA.x,e.y-S.pA.y)<0.05) return; S.pB=e; }
+  showProbe(); draw();
+}
+function esc(t){ return String(t).replace(/&/g,'&amp;').replace(/</g,'&lt;'); }
+function showProbe(){
+  const t=$('probe');
+  if(!S.pA){ t.className='dim'; t.textContent='Choose "Record a continuity check", click the first point, then the second. You can switch sides in between.'; return; }
+  t.className='';
+  if(!S.pB){ t.innerHTML=`<p>First point: <b>${esc(S.pA.label)}</b></p><p class="dim">Now click the second point.</p><div class="row"><button id="pCancel">Cancel <kbd>Esc</kbd></button></div>`; }
+  else{
+    const done=S.probes.find(p=>(p.a_label===S.pA.label&&p.b_label===S.pB.label)||(p.a_label===S.pB.label&&p.b_label===S.pA.label));
+    t.innerHTML=`<p><b>${esc(S.pA.label)}</b><br>to <b>${esc(S.pB.label)}</b></p>
+      ${done?`<p class="dim">Already recorded: ${done.result==='connected'?'connected':'not connected'}. Recording again replaces it.</p>`:''}
+      <div class="col"><button id="pYes" class="on" style="background:#2e7d4f;border-color:#2e7d4f;color:#fff">Beeps: connected <kbd>Y</kbd></button>
+      <button id="pNo">No beep: not connected <kbd>N</kbd></button></div>
+      <p class="dim" style="margin-top:6px">Resistance, if you measured it (ohms, optional)</p><input type="number" id="pOhms" min="0" step="any" style="width:100%">
+      <div class="row" style="margin-top:6px"><button id="pCancel">Cancel <kbd>Esc</kbd></button></div>`;
+    $('pYes').onclick=()=>recordProbe('connected'); $('pNo').onclick=()=>recordProbe('open');
+  }
+  $('pCancel').onclick=cancelProbe;
+}
+function cancelProbe(){ S.pA=null; S.pB=null; showProbe(); draw(); }
+function recordProbe(result){
+  if(!S.pA||!S.pB) return;
+  const a=S.pA,b=S.pB, ohms=($('pOhms')||{}).value||'';
+  const prev=JSON.stringify(S.probes);
+  S.probes=S.probes.filter(p=>!((p.a_label===a.label&&p.b_label===b.label)||(p.a_label===b.label&&p.b_label===a.label)));
+  const n=1+S.probes.reduce((m,p)=>Math.max(m,parseInt(String(p.id).replace(/\D/g,''))||0),0);
+  S.probes.push({id:'M'+n,a_side:a.side,a_x_mm:a.x.toFixed(3),a_y_mm:a.y.toFixed(3),a_label:a.label,b_side:b.side,b_x_mm:b.x.toFixed(3),b_y_mm:b.y.toFixed(3),b_label:b.label,
+    result,ohms,note:'',time:(d=>d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0')+' '+String(d.getHours()).padStart(2,'0')+':'+String(d.getMinutes()).padStart(2,'0'))(new Date())});
+  S.probeUndo=prev; S.pA=null; S.pB=null; showProbe(); listProbes(); pushProbes(); draw();
+}
+async function pushProbes(){
+  note('Saving...');
+  try{
+    const r=await fetch('/api/probes',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({base:S.probeVersion,rows:S.probes})});
+    if(r.status===409){ take(await (await fetch('/api/state')).json()); listProbes(); draw(); note('The readings were changed outside the editor. They have been reloaded: please record that one again.',true); }
+    else if(r.ok){ S.probeVersion=(await r.json()).version; note('Reading saved '+new Date().toLocaleTimeString()); }
+    else note('NOT SAVED (error '+r.status+')',true);
+  }catch(e){ note('NOT SAVED: is the tool still running?',true); }
+}
+function listProbes(){
+  const L=$('probeList');
+  if(!S.probes.length){ L.innerHTML='<p class="dim">No readings yet.</p>'; return; }
+  const c=S.probes.filter(p=>p.result==='connected').length;
+  L.innerHTML=`<p class="dim">${S.probes.length} reading${S.probes.length===1?'':'s'}: ${c} connected, ${S.probes.length-c} not connected</p>`+
+    S.probes.slice().reverse().map(p=>`<div class="pr"><span><span class="${p.result==='connected'?'ok':'no'}">${p.result==='connected'?'&#10003;':'&#10007;'}</span> ${esc(p.a_label)} &ndash; ${esc(p.b_label)}${p.ohms?' ('+esc(p.ohms)+' &Omega;)':''}</span><button data-del="${esc(p.id)}" title="Delete this reading">&times;</button></div>`).join('');
+  L.querySelectorAll('button[data-del]').forEach(b=>b.onclick=()=>{ S.probeUndo=JSON.stringify(S.probes); S.probes=S.probes.filter(p=>p.id!==b.dataset.del); listProbes(); pushProbes(); draw(); });
+}
+async function checkProbes(){
+  const t=$('probeCheck'); t.className='dim'; t.textContent=S.traceReady?'Comparing...':'Preparing the trace data. The first time takes about 15 seconds...';
+  let d; try{ d=await (await fetch('/api/probecheck')).json(); }catch(e){ t.textContent='Could not compare: is the tool still running?'; return; }
+  if(!d.ok){ t.textContent=d.reason; return; }
+  S.traceReady=true; t.className='';
+  const n=d.agree+d.disagree;
+  t.innerHTML=n||d.unknown?`<p>The picture agrees with <b>${d.agree} of ${n}</b> reading${n===1?'':'s'}.${d.unknown?' '+d.unknown+' could not be compared.':''}</p>`+
+    d.readings.filter(r=>r.status!=='agrees').map(r=>`<p class="dim">${esc(r.a)} &ndash; ${esc(r.b)}: measured ${r.result==='connected'?'connected':'not connected'}, ${esc(r.status)}</p>`).join('')+
+    '<p class="dim">Where they differ, the measurement is right.</p>' : '<p class="dim">Record some readings first.</p>';
+}
+async function makePlan(){
+  const from=$('planFrom').value, to=$('planTo').value, t=$('planOut');
+  if(!from||!to||from===to){ t.textContent='Pick two different parts.'; return; }
+  t.className='dim'; t.textContent=S.traceReady?'Planning...':'Preparing the trace data. The first time takes about 15 seconds...';
+  let d; try{ d=await (await fetch(`/api/probeplan?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`)).json(); }catch(e){ t.textContent='Could not plan: is the tool still running?'; return; }
+  if(!d.ok){ t.textContent=d.reason; return; }
+  S.traceReady=true; t.className='plan';
+  const done=(pin)=>S.probes.filter(p=>p.result==='connected'&&(p.a_label===from+' pin '+pin||p.b_label===from+' pin '+pin)&&(p.a_label.startsWith(to+' pin ')||p.b_label.startsWith(to+' pin ')));
+  t.innerHTML=`<p class="dim">Put one probe on each ${esc(from)} pin. Check the suggested ${esc(to)} pins first, then sweep the rest. Suggestions come from the picture and can be wrong.</p>`+
+    d.plan.map(p=>{ const m=done(p.pin), n=p.suggested.length;
+      const what = m.length?'<span class="ok">measured</span>' : n>4?`<span class="dim">picture unclear (it joins ${n} ${esc(to)} pins), sweep all</span>` : n?'check '+esc(to)+' pin '+p.suggested.map(esc).join(', ')+' first':'<span class="dim">no suggestion, sweep all</span>';
+      return `<p>${esc(from)} pin <b>${esc(p.pin)}</b>: ${what} <a data-pin="${esc(p.pin)}">start</a></p>`; }).join('');
+  t.querySelectorAll('a[data-pin]').forEach(a=>a.onclick=()=>{
+    const p=d.plan.find(q=>q.pin===a.dataset.pin);
+    if(p.side!==S.side) setSide(p.side);
+    setMode('probe'); S.pA={side:p.side,x:p.x,y:p.y,label:from+' pin '+p.pin}; S.pB=null;
+    S.planHi=p.suggested.length>4?[]:S.pins.filter(q=>q.ref===to&&p.suggested.includes(q.pad)).map(q=>({side:q.side,x:q.x,y:q.y}));
+    S.view.x=cv.getBoundingClientRect().width/2-p.x*S.view.s; S.view.y=cv.getBoundingClientRect().height/2-p.y*S.view.s;
+    showProbe(); draw(); });
 }
 function clearTrace(){ S.trace=null; $('trace').className='dim'; $('trace').textContent='Choose "Follow a trace", then click a piece of copper.'; draw(); }
 async function followTrace(mx,my,rebuild){
@@ -447,7 +622,7 @@ cv.addEventListener('mousedown',e=>{
 });
 window.addEventListener('mousemove',e=>{
   const [px,py]=pos(e), [mx,my]=toMm(px,py);
-  $('status').textContent = `x ${mx.toFixed(2)} mm   y ${my.toFixed(2)} mm   block c${Math.floor(mx/10)} r${Math.floor(my/10)}`;
+  $('status').textContent = `x ${mx.toFixed(2)} mm   y ${my.toFixed(2)} mm   block c${Math.floor(mx/10)} r${Math.floor(my/10)}`+(S.mode==='probe'&&!S.drag?'   '+endpointAt(mx,my).label:'');
   if(S.drag && e.buttons===0){ S.drag=null; draw(); return; }          // the button was let go somewhere we could not see
   if(S.drag&&S.drag.type==='pan'){ if(Math.hypot(px-S.drag.px,py-S.drag.py)>4) S.drag.moved=true;
     if(S.drag.moved){ S.view.x=S.drag.vx+px-S.drag.px; S.view.y=S.drag.vy+py-S.drag.py; draw(); } return; }
@@ -464,14 +639,16 @@ window.addEventListener('blur',()=>{ S.drag=null; S.space=false; draw(); });
 cv.addEventListener('wheel',e=>{ e.preventDefault(); const [px,py]=pos(e), [mx,my]=toMm(px,py); const f=Math.exp(-e.deltaY*0.0015);
   S.view.s=Math.max(3,Math.min(400,S.view.s*f)); S.view.x=px-mx*S.view.s; S.view.y=py-my*S.view.s; draw(); },{passive:false});
 window.addEventListener('keydown',e=>{
-  if(e.target.tagName==='INPUT') return;
+  if(e.target.tagName==='INPUT'||e.target.tagName==='SELECT') return;
   if(e.code==='Space'){ S.space=true; e.preventDefault(); return; }
-  if((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==='z'){ e.preventDefault(); undo(); return; }
+  if((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==='z'){ e.preventDefault();
+    if(S.mode==='probe'&&S.probeUndo){ S.probes=JSON.parse(S.probeUndo); S.probeUndo=null; listProbes(); pushProbes(); draw(); } else undo(); return; }
+  if(S.mode==='probe'&&S.pB&&!e.ctrlKey&&!e.metaKey&&!e.altKey){ const k0=e.key.toLowerCase(); if(k0==='y'){ recordProbe('connected'); return; } if(k0==='n'){ recordProbe('open'); return; } }
   if(e.ctrlKey||e.metaKey||e.altKey) return;
   const k=e.key.toLowerCase();
-  if(k==='s') setMode('select'); else if(k==='v') setMode('via'); else if(k==='t') setMode('testpad'); else if(k==='a') setMode('pad'); else if(k==='p') setMode('part'); else if(k==='d') setMode('delete'); else if(k==='w') setMode('trace');
+  if(k==='s') setMode('select'); else if(k==='v') setMode('via'); else if(k==='t') setMode('testpad'); else if(k==='a') setMode('pad'); else if(k==='p') setMode('part'); else if(k==='d') setMode('delete'); else if(k==='w') setMode('trace'); else if(k==='m') setMode('probe');
   else if(k==='c'){ $('showCopper').checked=!$('showCopper').checked; draw(); }
-  else if(k==='f') fit(); else if(k==='escape'){ S.sel=null; S.drag=null; if(S.trace) clearTrace(); setMode('select'); refresh(); }
+  else if(k==='f') fit(); else if(k==='escape'){ if(S.pA){ cancelProbe(); return; } S.sel=null; S.drag=null; if(S.trace) clearTrace(); setMode('select'); refresh(); }
   else if(k==='delete'||k==='backspace'){ const it=sideItems().find(i=>i.key===S.sel); if(it&&!it.removed) removeItem(it); }
 });
 window.addEventListener('keyup',e=>{ if(e.code==='Space'){ S.space=false; e.preventDefault(); } });
@@ -479,7 +656,8 @@ window.addEventListener('keyup',e=>{ if(e.code==='Space'){ S.space=false; e.prev
 document.addEventListener('click',e=>{ const b=e.target.closest('button'); if(b) b.blur(); });
 document.querySelectorAll('button[data-mode]').forEach(b=>b.onclick=()=>setMode(b.dataset.mode));
 $('bTop').onclick=()=>setSide('top'); $('bBottom').onclick=()=>setSide('bottom'); $('bFit').onclick=fit; $('bUndo').onclick=undo;
-['showRemoved','showLabels','showKnown','showGrid','showCopper'].forEach(id=>$(id).onchange=draw);
+['showRemoved','showLabels','showKnown','showGrid','showCopper','showProbes'].forEach(id=>$(id).onchange=draw);
+$('bCheck').onclick=checkProbes; $('bPlan').onclick=makePlan;
 ['trVias','trEdges'].forEach(id=>$(id).onchange=()=>{ if(S.trace&&S.lastTrace&&S.lastTrace[0]===S.side) followTrace(S.lastTrace[1],S.lastTrace[2]); });
 window.addEventListener('resize',resize);
 new ResizeObserver(()=>{ resize(); if(S.needFit) fit(); }).observe($('view'));

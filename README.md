@@ -93,8 +93,20 @@ Each script explains its inputs and outputs at the top of the file.
 | Add a part | P | Drag a box round the part |
 | Remove items | D | Click each wrong item |
 | Follow a trace | W | Click copper to highlight what the picture says it joins |
+| Record a continuity check | M | Click two points (a chip pin, via, pad or any spot), then press Y if your multimeter beeped or N if it did not |
 
 Scroll to zoom, drag to move, `C` shows the copper map, `Ctrl+Z` undoes. Every change is saved straight away to `data/review.csv`, with a backup. The editor listens on your own computer only.
+
+### Multimeter readings
+
+The picture cannot see copper under parts or inside the board, so the connection map has to come from measurements. Every project we found that ended up with a reliable map measured it. The editor makes that quick:
+
+- **Record a continuity check (M):** click the two points you probed, then press **Y** (beeped) or **N** (no beep). Readings go to `data/probes.csv`.
+- **Probe plan:** pick two parts, for example a connector and a chip. For each pin of the first, it lists the pins of the second that the picture suggests, so you check those first. When the picture is unclear it says so: sweep all the pins.
+- **Compare with the picture:** shows how many readings the trace picture agrees with. Where they differ, the measurement is right.
+- **KiCad:** `export_kicad.py` turns readings between chip pins into nets, so KiCad draws them as ratsnest lines to trace along.
+
+Clean flux off the board before measuring: flux residue can make the meter beep where there is no connection.
 
 ## How it works
 

@@ -199,6 +199,62 @@ def net_of(g, start, through_vias=True):
     return seen
 
 
+def island_at(g, side, x, y, reach_mm=0.2):
+    """The copper island under a point, or the nearest one within reach_mm (0 if none)."""
+    lab, off = g["labels"][side], g["offset"]
+    cy, cx = int(round(M.px(y))), int(round(M.px(x)))
+    H, W = lab.shape
+    if 0 <= cy < H and 0 <= cx < W and lab[cy, cx]:
+        return int(lab[cy, cx]) + off[side]
+    r = int(reach_mm * PP)
+    y0, x0 = max(0, cy - r), max(0, cx - r)
+    win = lab[y0:cy + r + 1, x0:cx + r + 1]
+    ys, xs = np.nonzero(win)
+    if not ys.size:
+        return 0
+    k = int(np.argmin((ys + y0 - cy) ** 2 + (xs + x0 - cx) ** 2))
+    return int(win[ys[k], xs[k]]) + off[side]
+
+
+def check_probes(g, probes):
+    """Compare multimeter readings with what the picture suggests.
+    probes: rows of probes.csv. Returns a summary and one line per reading."""
+    out, agree, disagree, unknown = [], 0, 0, 0
+    for p in probes:
+        if p.get("result") not in ("connected", "open"):
+            continue
+        a = island_at(g, p["a_side"], float(p["a_x_mm"]), float(p["a_y_mm"]))
+        b = island_at(g, p["b_side"], float(p["b_x_mm"]), float(p["b_y_mm"]))
+        if not a or not b:
+            status = "no copper found in the picture at one end"
+            unknown += 1
+        else:
+            joined = b in net_of(g, a)
+            ok = joined == (p["result"] == "connected")
+            agree += ok
+            disagree += not ok
+            status = "agrees" if ok else ("the picture shows them joined" if joined else "the picture does not join them")
+        out.append(dict(id=p["id"], a=p["a_label"], b=p["b_label"], result=p["result"], status=status))
+    return dict(ok=True, agree=agree, disagree=disagree, unknown=unknown, readings=out)
+
+
+def probe_plan(g, pins, from_ref, to_ref):
+    """For each pin of from_ref: the pins of to_ref the picture puts on the same copper.
+    pins: rows of known-pads.csv."""
+    def key(p):
+        return int(p["pad"]) if p["pad"].isdigit() else 10 ** 6
+    plan = []
+    for p in sorted((q for q in pins if q["ref"] == from_ref), key=key):
+        isl = island_at(g, p["side"], float(p["x_mm"]), float(p["y_mm"]), 0.1)
+        sugg = []
+        if isl:
+            for a in net_of(g, isl):
+                sugg += [n.split(" pin ")[1] for n in g["names"].get(a, []) if n.startswith(to_ref + " pin ")]
+        sugg = sorted(set(sugg), key=lambda s: int(s) if s.isdigit() else 10 ** 6)
+        plan.append(dict(pin=p["pad"], side=p["side"], x=float(p["x_mm"]), y=float(p["y_mm"]), suggested=sugg))
+    return dict(ok=True, plan=plan)
+
+
 def self_check(g):
     """Compare the result with the nets you already know (the net column of known-pads.csv):
     each known net should be one piece, and two known nets should not be joined.
